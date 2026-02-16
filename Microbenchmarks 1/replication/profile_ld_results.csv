@@ -1,0 +1,6 @@
+==PROF== Connected to process 18912 (C:\Users\aadit\Documents\Acads\SOP\GPU core & mem gargi\Microbenchmarks 1\replication\ld_benchmark.exe)
+==ERROR== ERR_NVGPUCTRPERM - The user does not have permission to access NVIDIA GPU Performance Counters on the target device 0. For instructions on enabling permissions and to get more information see https://developer.nvidia.com/ERR_NVGPUCTRPERM
+Array Size: 4 MB
+Time: 604.173 ms
+Effective Bandwidth: 694.222 GB/s
+==PROF== Disconnected from process 18912
