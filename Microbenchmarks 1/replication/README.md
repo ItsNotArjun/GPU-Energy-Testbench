@@ -75,3 +75,37 @@ To measure Watts and Joules/Bit (requires `pip install nvidia-ml-py`):
 ```cmd
 python measure_power.py --max_size_mb 2048 --csv power_results.csv
 ```
+
+### 4. GPU Clock Locking (Vital for Consistency)
+To prevent the GPU from changing clock speeds (DVFS) during the benchmark (which ruins power/perf linearity), you must lock the clocks.
+**Administrator Access Required.**
+
+*   **Query supported clocks:**
+    ```cmd
+    nvidia-smi -q -d SUPPORTED_CLOCKS
+    ```
+*   **Lock Clocks (Example: 1500 MHz):**
+    ```cmd
+    nvidia-smi -lgc 1500
+    ```
+*   **Reset to Auto:**
+    ```cmd
+    nvidia-smi -rgc
+    ```
+
+### 5. Profiling Step (Verification)
+To verify that your `ld.cu` is truly "Pointer Chasing" and `st.cu` is truly "Coalesced", run the included batch script:
+
+```cmd
+profile.bat
+```
+*(Requires Nsight Compute `ncu` in PATH)*
+
+**Interpreting Results:**
+1.  Open `profile_ld_results.csv`.
+2.  Calculate **Ratio = Sectors / Requests**.
+    *   **Ratio ≈ 4.0:** Correct. You are requesting 8 bytes (`uint64`), but the GPU fetches a minimum 32-byte "Sector". This 4x overhead is the "Price of Random Access."
+    *   **Ratio ≈ 1.0:** Incorrect. The GPU combined your reads (you failed to chase pointers).
+3.  Open `profile_st_results.csv`.
+    *   **Ratio ≈ 1.0:** Correct. You are writing contiguous data, so the GPU combined 4 threads into one 32-byte transaction. Efficient!
+    *   **Ratio > 1.0:** Incorrect. Your stride is breaking coalescence.
