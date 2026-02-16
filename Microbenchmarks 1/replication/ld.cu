@@ -91,20 +91,26 @@ int main(int argc, char** argv) {
     CHECK_CUDA(cudaMalloc(&d_array, total_bytes));
     CHECK_CUDA(cudaMemcpy(d_array, h_array.data(), total_bytes, cudaMemcpyHostToDevice));
 
-    // Launch Configuration
-    // 256 threads per block as requested
-    int threads_per_block = 256;
-    // Calculate grid size to cover the array or saturate GPU
-    // For large arrays (DRAM sweep), we want enough blocks to occupy the GPU.
-    // For pointer chasing, we generally match the array size or cap at a reasonable saturation point.
-    // Here we map 1 thread per element start point up to a max to ensure saturation without excessive overhead?
-    // User said: "Launch kernel with optimal block size". 
-    // We will launch enough blocks to cover the array size, to ensure we touch the whole memory range.
-    int blocks = (num_elements + threads_per_block - 1) / threads_per_block;
+    // Launch with optimal fixed block count to prevent low-occupancy at small sizes
+    // We launch enough blocks to saturate the GPU (e.g. 108 SMs * 32 blocks = ~3500 blocks)
+    // regardless of array size.
+    int threads_per_block = 256; 
+    int blocks = 4096; // Fixed high number to ensure saturation
+
+    // However, if array is small, we need to wrap the index access inside the kernel,
+    // otherwise threads > num_elements would just return immediately.
+    // The current kernel (ld.cu) performs "if (tid >= num_elements) return;".
+    // To fix this for the Power Measurement requirement (Sustained Execution on Small Arrays),
+    // we need to supply a 'mask' or ensure the kernel handles wrap-around if we launch more threads than elements.
     
-    // Cap blocks to avoid launch timeouts on massive arrays if not needed, 
-    // but for DRAM sweep we specifically want to touch the full footprint.
-    // So we keep blocks proportional to size.
+    // For replication strictness, we keep the original kernel logic but scale the grid to match array.
+    // Since 'load' is pointer chasing, we can't easily launch more threads than elements 
+    // without them chasing the SAME pointers (contention).
+    // So for 'ld.cu', we stick to (num_elements/256) but ensure 'iterations' is massive in the script.
+    
+    if (blocks * threads_per_block > num_elements) {
+        blocks = (num_elements + threads_per_block - 1) / threads_per_block;
+    }
     
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
