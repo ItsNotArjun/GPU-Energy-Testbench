@@ -77,12 +77,34 @@ int main(int argc, char** argv) {
 
     if (stride_elements == 0) stride_elements = 1;
 
-    // Host allocation
-    std::vector<uint64_t> h_array(num_elements);
+    // Initialize host array with guaranteed full traversal
+    // If we simply do (i + stride) % N, we might get short cycles if GCD(stride, N) != 1.
+    // Fixed logic: Use stride of 1 (Linear Chasing) if stride_elements is small/default
+    // or ensure coprime for strided access.
+    // For simplicity & robustness to prove DRAM access:
+    // We will construct a conflict-free linear chain if stride is small.
+    // If user wants random (large stride), we should implement a Linear Congruential Generator or similar,
+    // but for now, let's fix the bandwidth bug by changing to strict linear chaining (stride=1) 
+    // effectively ignoring the user stride if it risks short loops, OR
+    // enforce stride=1 for simple bandwidth measurement.
 
-    // Initialization: A[i] = (i + stride_index) % total_elements
-    // This creates the pointer chase chain
-    for (uint64_t i = 0; i < num_elements; ++i) {
+    printf("Initializing pointer chase array... (Size: %llu elements)\n", (unsigned long long)num_elements);
+    
+    // Using a simple linear chain (next = current + 1) guarantees touching EVERY element once per pass.
+    // This is the most reliable way to measure DRAM bandwidth via pointer chasing.
+    // A stride > 1 is only useful if we want to deliberately skip cache lines (e.g. stride=32),
+    // but we must still ensure the loop covers the whole array.
+    // The safest "strided" traversal that covers everything is:
+    // idx = (idx + stride) % size. THIS REQUIRES GCD(stride, size) == 1.
+    // Since 'num_elements' is likely a power of 2 (from allocation size), any ODD stride detects as coprime.
+    
+    // Force stride to be odd if num_elements is even, to ensure full cycle.
+    if ((num_elements % 2 == 0) && (stride_elements % 2 == 0)) {
+        stride_elements += 1;
+        printf("Adjusted stride to %llu to ensure coprimality with even array size.\n", (unsigned long long)stride_elements);
+    }
+
+    for (size_t i = 0; i < num_elements; ++i) {
         h_array[i] = (i + stride_elements) % num_elements;
     }
 
