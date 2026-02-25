@@ -67,23 +67,19 @@ def run_sweep(benchmark_name, stride_bytes=32, max_size_mb=1024):
     print("-" * 50)
     
     # Defined Sweep Ranges based on Requirements
-    # L1: 16KB (0.015MB) to 256KB (0.25MB)
+    # L1: 16KB to 256KB
     l1_points = [0.015625, 0.03125, 0.0625, 0.125, 0.25] 
     
-    # L2: 1MB to 50MB
-    l2_points = [1, 2, 4, 8, 16, 24, 32, 40, 50]
+    # L2: 1MB to 64MB (Trying to capture the large L2 of Ada Lovelace)
+    l2_points = [1, 2, 4, 8, 16, 24, 32, 40, 50, 64]
     
-    # DRAM: 100MB to 1GB
-    dram_points = [100, 256, 512, 768, 1024]
+    # DRAM: 100MB to 16GB / 24GB
+    # We define a long list, and max_size_mb will cut it off.
+    dram_points = [100, 256, 512, 768, 1024, 2048, 4096, 8192, 12288, 16384, 24576]
 
-    # Additional Points for Big GPUs (>4GB VRAM)
-    # These are only added if max_size_mb allows it
-    big_points = [4096, 10240, 20480, 40960, 81920]
-    
+    # Combine into all_points logic
     # Filter points based on max_size_mb
-    dram_points.extend([p for p in big_points if p <= max_size_mb])
-    
-    # Ensure standard points are also filtered just in case user sets very low limit
+    l2_points = [p for p in l2_points if p <= max_size_mb]
     dram_points = [p for p in dram_points if p <= max_size_mb]
     
     all_points = [

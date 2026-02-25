@@ -1,6 +1,12 @@
-==PROF== Connected to process 18912 (C:\Users\aadit\Documents\Acads\SOP\GPU core & mem gargi\Microbenchmarks 1\replication\ld_benchmark.exe)
-==ERROR== ERR_NVGPUCTRPERM - The user does not have permission to access NVIDIA GPU Performance Counters on the target device 0. For instructions on enabling permissions and to get more information see https://developer.nvidia.com/ERR_NVGPUCTRPERM
+==PROF== Connected to process 17936 (C:\Users\aadit\Documents\Acads\SOP\GPU core & mem gargi\SOP_github\GPU-Energy-Testbench\Microbenchmarks 1\replication\ld_benchmark.exe)
+Initializing randomized pointer chase (Fisher-Yates)... (Size: 524288 elements)
+Randomization complete.
 Array Size: 4 MB
-Time: 604.173 ms
-Effective Bandwidth: 694.222 GB/s
-==PROF== Disconnected from process 18912
+Time: 91.4069 ms
+Effective Bandwidth: 4.58861 GB/s
+==PROF== Disconnected from process 17936
+"ID","Process ID","Process Name","Host Name","Kernel Name","Context","Stream","Block Size","Grid Size","Device","CC","Section Name","Metric Name","Metric Unit","Metric Value"
+"0","17936","ld_benchmark.exe","127.0.0.1","load_kernel(unsigned long long *, unsigned long long, unsigned long long)","1","7","(256, 1, 1)","(2048, 1, 1)","0","8.6","Command line profiler metrics","l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum","","16,38,400"
+"0","17936","ld_benchmark.exe","127.0.0.1","load_kernel(unsigned long long *, unsigned long long, unsigned long long)","1","7","(256, 1, 1)","(2048, 1, 1)","0","8.6","Command line profiler metrics","l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum","sector","5,04,10,305"
+"1","17936","ld_benchmark.exe","127.0.0.1","load_kernel(unsigned long long *, unsigned long long, unsigned long long)","1","7","(256, 1, 1)","(2048, 1, 1)","0","8.6","Command line profiler metrics","l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum","","16,38,400"
+"1","17936","ld_benchmark.exe","127.0.0.1","load_kernel(unsigned long long *, unsigned long long, unsigned long long)","1","7","(256, 1, 1)","(2048, 1, 1)","0","8.6","Command line profiler metrics","l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum","sector","5,04,10,705"

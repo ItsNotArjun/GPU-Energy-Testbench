@@ -34,16 +34,16 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo [1/2] Profiling Load Benchmark (Size: 4MB - L2 Target)...
-echo Running: ncu --csv --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum ld_benchmark.exe 4.0 128 1000
+echo Running: ncu --csv --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum ld_benchmark.exe 4.0 128 1
 echo ------------------------------------------------------------------------------
-ncu --csv --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum ld_benchmark.exe 4.0 128 1000 > profile_ld_results.csv
+ncu --csv --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum ld_benchmark.exe 4.0 128 1 > profile_ld_results.csv
 type profile_ld_results.csv
 
 echo.
 echo [2/2] Profiling Store Benchmark (Size: 100MB - DRAM Target)...
-echo Running: ncu --csv --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum,l1tex__t_requests_pipe_lsu_mem_global_op_st.sum st_benchmark.exe 100.0 32 1000
+echo Running: ncu --csv --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum,l1tex__t_requests_pipe_lsu_mem_global_op_st.sum st_benchmark.exe 100.0 32 1
 echo ------------------------------------------------------------------------------
-ncu --csv --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum,l1tex__t_requests_pipe_lsu_mem_global_op_st.sum st_benchmark.exe 100.0 32 1000 > profile_st_results.csv
+ncu --csv --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum,l1tex__t_requests_pipe_lsu_mem_global_op_st.sum st_benchmark.exe 100.0 32 1 > profile_st_results.csv
 type profile_st_results.csv
 
 echo.

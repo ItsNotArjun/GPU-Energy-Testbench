@@ -183,19 +183,17 @@ def main():
     
     # Sweep Points (Power Measurement takes time, so we pick key points)
     # L1 (Small), L2 (Medium), DRAM (Large)
-    # L1: 0.03MB (32KB), 0.0625MB (64KB), 0.25MB (256KB) - covering L1 range
-    # L2: 4MB, 16MB, 50MB - covering L2 range
+    # 0.25 (L1), 4/16/50 (L2), 1GB, 4GB, 8GB, 12GB, 16GB, 24GB
     
     all_sizes = [0.03125, 0.0625, 0.25, 4.0, 16.0, 50.0] 
     
-    # Add large sizes if allowed
-    if args.max_size_mb >= 10240:
-        all_sizes.extend([1024.0, 4096.0, 10240.0])
-    elif args.max_size_mb >= 4096:
-        all_sizes.extend([1024.0, 4096.0])
-    elif args.max_size_mb >= 1024:
-        all_sizes.append(1024.0)
-        
+    # Add large sizes up to max
+    large_candidates = [1024.0, 4096.0, 8192.0, 12288.0, 16384.0, 24576.0]
+    
+    for s in large_candidates:
+        if s <= args.max_size_mb:
+            all_sizes.append(s)
+
     results = []
     
     print(f"\n>>> Starting Power Sweep (Target: {TARGET_DURATION_SEC}s per run) <<<\n")
