@@ -182,14 +182,17 @@ def main():
     exe_st = compile_benchmark("st", args.arch)
     
     # Sweep Points (Power Measurement takes time, so we pick key points)
-    # L1 (Small) -> L2 (Medium) -> DRAM (Large)
-    # 0.25MB (L1), 4MB (L2), 10GB (DRAM)
+    # L1 (Small), L2 (Medium), DRAM (Large)
+    # L1: 0.03MB (32KB), 0.0625MB (64KB), 0.25MB (256KB) - covering L1 range
+    # L2: 4MB, 16MB, 50MB - covering L2 range
     
-    all_sizes = [0.25, 4.0, 50.0] 
+    all_sizes = [0.03125, 0.0625, 0.25, 4.0, 16.0, 50.0] 
     
     # Add large sizes if allowed
     if args.max_size_mb >= 10240:
-        all_sizes.append(10240.0)
+        all_sizes.extend([1024.0, 4096.0, 10240.0])
+    elif args.max_size_mb >= 4096:
+        all_sizes.extend([1024.0, 4096.0])
     elif args.max_size_mb >= 1024:
         all_sizes.append(1024.0)
         
