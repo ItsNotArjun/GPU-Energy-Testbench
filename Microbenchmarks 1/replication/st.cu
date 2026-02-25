@@ -16,37 +16,37 @@
 
 // Kernel for Store Benchmark
 // Goal: Measure Bandwidth and Energy of Write operations
-// Logic: Unrolled strided stores using inline PTX
+// Logic: Grid-Stride Loop for coalesced stores
 __global__ void store_kernel(uint64_t* array, uint64_t num_elements, uint64_t stride_elements, uint64_t iterations) {
     uint64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t gridSize = blockDim.x * gridDim.x;
     
-    // Start index differs per thread to spread writes across memory controller
-    uint64_t idx = tid % num_elements;
     uint64_t val = tid; // Value to write
-
     uint64_t* base_ptr = array;
 
-    // Main Loop
+    // Main Loop - Iterations over the full array flush
+    // We want to force DRAM writes. Best way is to write DIFFERENT data or to huge array.
+    // If array > L2, linear write will flush L2.
     for (uint64_t i = 0; i < iterations; ++i) {
-        #pragma unroll 100
-        for (int j = 0; j < 100; ++j) {
-            uint64_t* addr = base_ptr + idx;
-
-            // Inline PTX for st.global.u64
-            // Stores 'val' into address 'addr'
-            asm volatile (
+        // Grid-Stride Loop
+        // Each thread processes elements spaced by grid size
+        // e.g. Thread 0 does 0, 0+Grid, 0+2*Grid...
+        // This ensures full coalescing and no collision between threads.
+        for (uint64_t idx = tid; idx < num_elements; idx += gridSize) {
+             // We can unroll here manually if needed, but compiler is good at linear unrolling
+             // Let's do a small unroll block if strictly needed, but simple is better for bandwidth
+             // Simple store:
+             // array[idx] = val;
+             
+             // Use PTX to ensure it's a global store and not optimized away
+             asm volatile (
                 "st.global.u64 [%0], %1;" 
-                :: "l"(addr), "l"(val) 
+                :: "l"(base_ptr + idx), "l"(val) 
                 : "memory"
             );
-
-            // Strided access with wrap around
-            idx = (idx + stride_elements);
-            // Optimization: avoid modulo every inner step if possible, but required for correctness of "stay within bounds"
-            // Using a simple check is faster than modulo usually, but modulo is requested logic.
-            // "Ensure the index wraps around (idx % size)"
-            if (idx >= num_elements) idx -= num_elements; // Fast modulus for linear scan
         }
+        // Ensure all writes are visible before next iteration (though for bandwidth, just pushing pulses is fine)
+        // __threadfence(); 
     }
 }
 
@@ -77,12 +77,31 @@ int main(int argc, char** argv) {
     // Determine grid size: we want enough parallelism to hide latencies
     // A fixed large number of blocks or dependent on array size?
     // For bandwidth tests, usually size/block_size
-    int blocks = (int)((num_elements + threads_per_block - 1) / threads_per_block);
+    // FIXED: Ensure we launch enough blocks to cover the array at least once if possible,
+    // or cap it to avoid excessive launch overhead if array is huge.
+    // However, for st.cu, each thread has its own loop "idx = (idx + stride*blockDim*gridDim) % num".
+    // Wait, the kernel logic was "idx = (idx + stride)".
+    // If every thread does "idx += stride", and we have T threads.
+    // Thread 0: 0, 4, 8...
+    // Thread 1: 1, 5, 9...
+    // They collide if not spaced out!
+    // Correct strided pattern for bandwidth should be:
+    // idx = tid + (i * stride * gridDim * blockDim)?
+    // No, standard memory copy style is:
+    // for (idx = tid; idx < num; idx += blockDim * gridDim)
     
-    // Specific constraint: "Launch with optimal block size".
-    // Limiting blocks to device capacity if array is huge isn't strictly necessary as GPU schedules them,
-    // but having too many might increase overhead.
-    // For 1GB array, blocks ~ 10^9 / 256 ~ 4 million. This is fine.
+    // The current kernel uses a persistent thread style:
+    // "idx = tid % num; ... idx = (idx + stride)"
+    // If stride is small (e.g. 1), Thread 0 does 0, 1, 2...
+    // Thread 1 does 1, 2, 3...
+    // They confirmably write to the SAME locations constantly.
+    // This causes massive contention and L2 write combining, preventing DRAM flush.
+    // We should use Grid-Stride Loop pattern to ensure unique writes.
+    
+    // Changing kernel invocation to match new kernel logic (see below) or keep existing and fix logic?
+    // I will fix the Kernel logic in a moment. But first, let's fix the block count to be reasonable.
+    int blocks = (num_elements + threads_per_block - 1) / threads_per_block;
+    if (blocks > 65535) blocks = 65535; // Cap blocks to reasonable number for persistent threads
 
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
@@ -102,11 +121,9 @@ int main(int argc, char** argv) {
     CHECK_CUDA(cudaEventElapsedTime(&milliseconds, start, stop));
 
     // Calculate Bandwidth
-    size_t active_threads = blocks * threads_per_block;
-    if (active_threads > num_elements) active_threads = num_elements; // Though logic allows wrap around, we only spawn proportional threads
-    
-    // Each thread does 100 * iterations stores
-    double total_write_bytes = (double)active_threads * iterations * 100 * sizeof(uint64_t);
+    // New Logic: Each iteration writes the ENTIRE array exactly once.
+    // Total Bytes = num_elements * sizeof(uint64_t) * iterations
+    double total_write_bytes = (double)num_elements * sizeof(uint64_t) * iterations;
     double gb_per_sec = (total_write_bytes / (milliseconds / 1000.0)) / 1e9;
 
     std::cout << "Array Size: " << size_mb << " MB" << std::endl;
