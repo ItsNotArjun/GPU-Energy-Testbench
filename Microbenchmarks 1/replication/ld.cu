@@ -104,6 +104,8 @@ int main(int argc, char** argv) {
         printf("Adjusted stride to %llu to ensure coprimality with even array size.\n", (unsigned long long)stride_elements);
     }
 
+    std::vector<uint64_t> h_array(num_elements);
+
     for (size_t i = 0; i < num_elements; ++i) {
         h_array[i] = (i + stride_elements) % num_elements;
     }
