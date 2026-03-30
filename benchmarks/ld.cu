@@ -19,18 +19,20 @@
 // Kernel for Load Benchmark
 // Goal: Measure Latency and Throughput using Pointer Chasing
 // Logic: Unrolled pointer chasing loop using inline PTX
-__global__ void load_kernel(uint64_t* array, uint64_t num_elements, uint64_t stride_elements, uint64_t iterations) {
+__global__ void load_kernel(uint64_t* array, uint64_t num_elements,
+                            uint64_t stride_elements, uint64_t num_chunks,
+                            uint64_t iterations) {
     uint64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     
     // Ensure we don't go out of bounds if grid is larger than needed
     // However, for bandwidth saturation, each thread needs its own chain.
     // If num_elements is small and we have many threads, they will overlap, which is fine for saturation.
     
-    if (tid >= num_elements) return;
+    if (tid >= num_chunks) return;
 
     // Start each thread at a unique index (offset by tid)
     // The initialization ensures A[i] points to specific next elements.
-    uint64_t current_idx = tid;
+    uint64_t current_idx = tid * stride_elements;
     uint64_t* base_ptr = array;
 
     // Main loop
@@ -83,22 +85,52 @@ int main(int argc, char** argv) {
     // This destroys spatial locality and ensures true DRAM latency/bandwidth measurement
     // by defeating the L2 cache prefetchers.
     
-    printf("Initializing strided pointer chain (stride=%llu elements, %llu bytes)...\n",
+    printf("Initializing strided random chunk chain (stride=%llu elements, %llu bytes)...\n",
            (unsigned long long)stride_elements,
            (unsigned long long)stride_bytes);
 
-    std::vector<uint64_t> h_array(num_elements);
-    // Build a deterministic strided cycle:
-    // element i points to (i + stride_elements) % num_elements.
-    // This creates one or more cycles depending on gcd(num_elements, stride_elements).
-    // Each thread starts at tid and chases elements exactly stride_elements apart.
-    omp_set_num_threads(20);
-    #pragma omp parallel for schedule(static)
-    for (size_t i = 0; i < num_elements; ++i) {
-        h_array[i] = (i + stride_elements) % num_elements;
+    std::vector<uint64_t> h_array(num_elements, 0);
+
+    // Divide the array into chunks of stride_elements each.
+    // Shuffle the chunk ORDER randomly (defeats hardware prefetcher —
+    // the prefetcher cannot predict which chunk comes next).
+    // Within each chunk, only element 0 is used as the chain link;
+    // the rest are filled with 0 (never chased).
+    // This gives: random traversal order (like Fisher-Yates) but each
+    // pointer hop lands exactly stride_elements apart in the chunk index
+    // space, keeping accesses sector-aligned.
+    uint64_t num_chunks = num_elements / stride_elements;
+
+    std::vector<uint64_t> chunk_order(num_chunks);
+    for (uint64_t i = 0; i < num_chunks; ++i) chunk_order[i] = i;
+
+    // Fisher-Yates shuffle on chunks only — much faster than shuffling
+    // all elements (num_chunks = num_elements / stride_elements, e.g.
+    // for 256MB at stride=32B: 4M chunks vs 32M elements).
+    srand(42);
+    for (uint64_t i = num_chunks - 1; i > 0; --i) {
+        uint64_t j = (uint64_t)rand() % (i + 1);
+        std::swap(chunk_order[i], chunk_order[j]);
     }
 
-    printf("Strided chain initialised.\n");
+    // Link chunks in shuffled order.
+    // h_array[chunk_order[i] * stride_elements] = chunk_order[i+1] * stride_elements
+    // i.e. the first element of chunk i points to the first element of the next chunk.
+    omp_set_num_threads(20);
+    #pragma omp parallel for schedule(static)
+    for (uint64_t i = 0; i < num_chunks; ++i) {
+        uint64_t this_elem = chunk_order[i] * stride_elements;
+        uint64_t next_elem = chunk_order[(i + 1) % num_chunks] * stride_elements;
+        h_array[this_elem] = next_elem;
+        // Fill rest of this chunk with 0 (these elements are never chased)
+        for (uint64_t k = 1; k < stride_elements; ++k) {
+            h_array[this_elem + k] = 0;
+        }
+    }
+
+    printf("Strided chain initialised. Chunks: %llu, chunk_size: %llu elements.\n",
+           (unsigned long long)num_chunks,
+           (unsigned long long)stride_elements);
 
     // Device allocation
     uint64_t* d_array;
@@ -122,8 +154,8 @@ int main(int argc, char** argv) {
     // without them chasing the SAME pointers (contention).
     // So for 'ld.cu', we stick to (num_elements/256) but ensure 'iterations' is massive in the script.
     
-    if (blocks * threads_per_block > num_elements) {
-        blocks = (num_elements + threads_per_block - 1) / threads_per_block;
+    if (blocks * threads_per_block > num_chunks) {
+        blocks = (num_chunks + threads_per_block - 1) / threads_per_block;
     }
     
     cudaEvent_t start, stop;
@@ -132,13 +164,18 @@ int main(int argc, char** argv) {
 
     // Warmup: traverse the full pointer chain at least once to pull working set into cache.
     // The chain has num_elements links; the kernel does 100 steps per outer iteration.
-    uint64_t warmup_iters = std::max((uint64_t)1, (uint64_t)(num_elements / (100 * (uint64_t)(blocks * threads_per_block))));
-    load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements, stride_elements, warmup_iters);
+    uint64_t active_threads_for_warmup = (uint64_t)(blocks * threads_per_block);
+    if (active_threads_for_warmup > num_elements) active_threads_for_warmup = num_elements;
+    uint64_t warmup_iters = std::max((uint64_t)1,
+        num_chunks / (active_threads_for_warmup * 100));
+    load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements,
+        stride_elements, num_chunks, warmup_iters);
     CHECK_CUDA(cudaDeviceSynchronize());
 
     // Measurement
     CHECK_CUDA(cudaEventRecord(start));
-    load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements, stride_elements, iterations);
+    load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements,
+        stride_elements, num_chunks, iterations);
     CHECK_CUDA(cudaEventRecord(stop));
     CHECK_CUDA(cudaEventSynchronize(stop));
 
@@ -153,11 +190,11 @@ int main(int argc, char** argv) {
     // Data per thread = Iterations * 100 * sizeof(uint64_t)
     // Active threads = blocks * threads_per_block (clamped to num_elements in kernel)
     
-    // Accurate active thread count:
-    size_t active_threads = (blocks * threads_per_block); 
-    if (active_threads > num_elements) active_threads = num_elements;
-
-    double total_data_bytes = (double)active_threads * iterations * 100 * sizeof(uint64_t);
+    size_t active_threads = (size_t)(blocks * threads_per_block);
+    if (active_threads > num_chunks) active_threads = num_chunks;
+    // Each thread does iterations * 100 pointer hops.
+    // Each hop fetches stride_bytes (one sector = 32 bytes for stride=32B).
+    double total_data_bytes = (double)active_threads * iterations * 100 * stride_bytes;
     double gb_per_sec = (total_data_bytes / (milliseconds / 1000.0)) / 1e9;
 
     std::cout << "Stride Bytes: " << stride_bytes << std::endl;
