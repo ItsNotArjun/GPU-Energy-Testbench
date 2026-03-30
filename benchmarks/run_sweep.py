@@ -11,10 +11,8 @@ def compile_benchmarks(arch):
     print(f"Compiling Benchmarks for {arch}...")
     
     # Compile ld.cu
-    cmd_ld = [
-        "nvcc", "-O3", f"-arch={arch}", 
-        "ld.cu", "-o", "ld_benchmark"
-    ]
+    cmd_ld = ["nvcc", "-O3", f"-arch={arch}", "-Xcompiler", "-fopenmp", "ld.cu", "-o", "ld_benchmark", "-lgomp"]
+    
     print(f"Running: {' '.join(cmd_ld)}")
     res_ld = subprocess.run(cmd_ld, capture_output=True, text=True)
     if res_ld.returncode != 0:
