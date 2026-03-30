@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
 
     // Warmup: traverse the full pointer chain at least once to pull working set into cache.
     // The chain has num_elements links; the kernel does 100 steps per outer iteration.
-    uint64_t warmup_iters = std::max((uint64_t)1, (uint64_t)(num_elements / 100));
+    uint64_t warmup_iters = std::max((uint64_t)1, (uint64_t)(num_elements / (100 * (uint64_t)(blocks * threads_per_block))));
     load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements, stride_elements, warmup_iters);
     CHECK_CUDA(cudaDeviceSynchronize());
 
