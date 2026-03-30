@@ -5,6 +5,7 @@ import csv
 import argparse
 import sys
 import os
+import re
 try:
     import pynvml
 except ImportError:
@@ -14,6 +15,7 @@ except ImportError:
 # Configuration
 TARGET_DURATION_SEC = 3.0  # Run benchmarks for at least 3 seconds
 POWER_SAMPLE_INTERVAL = 0.01 # Sample every 10ms
+IDLE_WINDOW_SEC = 0.4   # seconds of GPU idle time sampled before each kernel for static power baseline
 
 class PowerMonitor:
     def __init__(self, device_index=0):
@@ -119,43 +121,91 @@ def calibrate_iterations(executable, size_mb, stride_bytes):
     # Safety clamp: Don't run 0 iterations
     return max(needed_iters, 1)
 
-def run_power_test(benchmark_type, executable_name, size_mb, stride_bytes, power_monitor):
-    print(f"Running {executable_name}: {size_mb} MB...", end="", flush=True)
-    
-    # 1. Calibrate
-    iters = calibrate_iterations(executable_name, size_mb, stride_bytes)
-    # print(f" (iters={iters}) ", end="") 
-    
-    # 2. Start Power Monitor
-    power_monitor.start()
-    
-    # 3. Run Benchmark
+def run_power_test(benchmark_type, executable_name, size_mb, stride_bytes,
+                   power_monitor, n_runs=3):
+    """
+    Measure dynamic energy for one (benchmark, size) combination.
+
+    Steps per run:
+      1. Idle window: sample NVML for IDLE_WINDOW_SEC to get static power baseline.
+      2. Kernel run: start NVML, launch kernel, stop NVML.
+      3. Compute dynamic_power = avg_kernel_power - static_power.
+      4. Parse kernel_time_s from the binary's stdout ("Time: X ms").
+      5. dynamic_energy_J = dynamic_power * kernel_time_s.
+    Repeat n_runs times and report mean, std, min, max of dynamic_energy_J.
+    """
+    import re
+    import statistics
+
+    print(f"  [{benchmark_type}] {size_mb} MB | stride={stride_bytes}B | {n_runs} run(s)...")
+
     exe_path = f"./{executable_name}"
-    if os.name == 'nt': exe_path += ".exe"
-    
-    cmd = [exe_path, str(size_mb), str(stride_bytes), str(iters)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    # 4. Stop Monitor
-    avg_power, max_power = power_monitor.stop()
-    
-    # 5. Parse Bandwidth from output
-    try:
-        # Looking for: "Effective Bandwidth: 123.45 GB/s"
-        import re
-        match = re.search(r"Effective Bandwidth:\s+([\d\.]+)\s+GB/s", result.stdout)
-        bandwidth = float(match.group(1)) if match else 0.0
-    except:
-        bandwidth = 0.0
-        
-    print(f" Done. BW: {bandwidth:.2f} GB/s | Power: {avg_power:.2f} W")
-    
+    if os.name == 'nt':
+        exe_path += ".exe"
+
+    # Calibrate iterations once (outside the run loop)
+    iters = calibrate_iterations(executable_name, size_mb, stride_bytes)
+
+    dynamic_energies_J = []
+
+    for run_idx in range(n_runs):
+        # --- Step 1: Measure static (idle) power ---
+        power_monitor.start()
+        time.sleep(IDLE_WINDOW_SEC)
+        static_avg_w, _ = power_monitor.stop()
+
+        # --- Step 2: Run kernel and measure active power ---
+        power_monitor.start()
+        cmd = [exe_path, str(size_mb), str(stride_bytes), str(iters)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        kernel_avg_w, _ = power_monitor.stop()
+
+        # --- Step 3: Parse kernel execution time from stdout ---
+        time_match = re.search(r"Time:\s+([\d\.]+)\s+ms", result.stdout)
+        kernel_time_s = (float(time_match.group(1)) / 1000.0) if time_match else 0.0
+
+        # --- Step 4: Parse bandwidth ---
+        bw_match = re.search(r"Effective Bandwidth:\s+([\d\.]+)\s+GB/s", result.stdout)
+        bandwidth = float(bw_match.group(1)) if bw_match else 0.0
+
+        # --- Step 5: Compute dynamic energy ---
+        dynamic_power_w = max(0.0, kernel_avg_w - static_avg_w)
+        dynamic_energy_j = dynamic_power_w * kernel_time_s
+        dynamic_energies_J.append(dynamic_energy_j)
+
+        print(f"    run {run_idx+1}: static={static_avg_w:.2f}W  kernel={kernel_avg_w:.2f}W  "
+              f"dynamic={dynamic_power_w:.2f}W  t={kernel_time_s:.3f}s  "
+              f"dyn_E={dynamic_energy_j*1e3:.3f}mJ  BW={bandwidth:.1f}GB/s")
+
+    # Aggregate across runs
+    mean_dyn_e = statistics.mean(dynamic_energies_J)
+    std_dyn_e  = statistics.stdev(dynamic_energies_J) if n_runs > 1 else 0.0
+    min_dyn_e  = min(dynamic_energies_J)
+    max_dyn_e  = max(dynamic_energies_J)
+
+    # Recompute bandwidth and static power from the last run for reporting
+    # (bandwidth is stable across runs; static power varies slightly)
+    # Compute energy per bit using DYNAMIC energy only:
+    # bits_transferred = bandwidth (GB/s) * kernel_time_s * 1e9 * 8
+    bits_transferred = bandwidth * kernel_time_s * 1e9 * 8 if (bandwidth > 0 and kernel_time_s > 0) else 1.0
+    dynamic_epj_bit  = (mean_dyn_e / bits_transferred) * 1e12 if bits_transferred > 0 else 0.0
+
+    print(f"    => mean_dyn_E={mean_dyn_e*1e3:.3f}mJ  std={std_dyn_e*1e3:.3f}mJ  "
+          f"dyn_pJ/bit={dynamic_epj_bit:.2f}")
+
     return {
-        "Benchmark": benchmark_type,
-        "Size_MB": size_mb,
-        "Bandwidth_GBs": bandwidth,
-        "Avg_Power_W": avg_power,
-        "Energy_pJ_bit": (avg_power / (bandwidth * 1e9 * 8)) * 1e12 if bandwidth > 0 else 0
+        "Benchmark":           benchmark_type,
+        "Size_MB":             size_mb,
+        "Stride_Bytes":        stride_bytes,
+        "Bandwidth_GBs":       bandwidth,
+        "Static_Power_W":      static_avg_w,
+        "Avg_Kernel_Power_W":  kernel_avg_w,
+        "Dynamic_Power_W":     dynamic_power_w,
+        "Mean_Dynamic_Energy_J": mean_dyn_e,
+        "Std_Dynamic_Energy_J":  std_dyn_e,
+        "Min_Dynamic_Energy_J":  min_dyn_e,
+        "Max_Dynamic_Energy_J":  max_dyn_e,
+        "Dynamic_Energy_pJ_bit": dynamic_epj_bit,
     }
 
 def main():
@@ -163,6 +213,14 @@ def main():
     parser.add_argument("--arch", type=str, default="sm_80", help="GPU Arch")
     parser.add_argument("--csv", type=str, default="power_results.csv")
     parser.add_argument("--max_size_mb", type=float, default=1024.0, help="Maximum array size (MB). Set to VRAM capacity - 2GB.")
+    parser.add_argument(
+        "--stride", type=int, default=32,
+        help="Stride in bytes for BOTH benchmarks. Must match what run_sweep.py uses. Default: 32."
+    )
+    parser.add_argument(
+        "--runs", type=int, default=3,
+        help="Number of repeated measurements per (size, benchmark) point. Results are averaged. Default: 3."
+    )
     args = parser.parse_args()
     
     # Initialize NVML
@@ -200,13 +258,11 @@ def main():
     
     for size in all_sizes:
         # Load
-        # Stride 128 for Load (matches sweep)
-        res_ld = run_power_test("Load", exe_ld, size, 128, monitor)
+        res_ld = run_power_test("Load",  exe_ld, size, args.stride, monitor, n_runs=args.runs)
         results.append(res_ld)
         
         # Store
-        # Stride 32 for Store (matches sweep)
-        res_st = run_power_test("Store", exe_st, size, 32, monitor)
+        res_st = run_power_test("Store", exe_st, size, args.stride, monitor, n_runs=args.runs)
         results.append(res_st)
         
     # Save CSV

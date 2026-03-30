@@ -17,7 +17,7 @@
 // Kernel for Load Benchmark
 // Goal: Measure Latency and Throughput using Pointer Chasing
 // Logic: Unrolled pointer chasing loop using inline PTX
-__global__ void load_kernel(uint64_t* array, uint64_t num_elements, uint64_t iterations) {
+__global__ void load_kernel(uint64_t* array, uint64_t num_elements, uint64_t stride_elements, uint64_t iterations) {
     uint64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     
     // Ensure we don't go out of bounds if grid is larger than needed
@@ -77,40 +77,24 @@ int main(int argc, char** argv) {
 
     if (stride_elements == 0) stride_elements = 1;
 
-    // Initialize host array with Randomized Traversal (Fisher-Yates Shuffle)
+    // Initialize host array with deterministic strided pointer chain
     // This destroys spatial locality and ensures true DRAM latency/bandwidth measurement
     // by defeating the L2 cache prefetchers.
     
-    printf("Initializing randomized pointer chase (Fisher-Yates)... (Size: %llu elements)\n", (unsigned long long)num_elements);
-    
-    // Host allocation
+    printf("Initializing strided pointer chain (stride=%llu elements, %llu bytes)...\n",
+           (unsigned long long)stride_elements,
+           (unsigned long long)stride_bytes);
+
     std::vector<uint64_t> h_array(num_elements);
-
-    // Create a linear sequence first: 0, 1, 2, ... N-1
-    std::vector<uint64_t> indices(num_elements);
+    // Build a deterministic strided cycle:
+    // element i points to (i + stride_elements) % num_elements.
+    // This creates one or more cycles depending on gcd(num_elements, stride_elements).
+    // Each thread starts at tid and chases elements exactly stride_elements apart.
     for (size_t i = 0; i < num_elements; ++i) {
-        indices[i] = i;
+        h_array[i] = (i + stride_elements) % num_elements;
     }
 
-    // Shuffle the indices
-    // We use a simple randomness approach. For scientific rigor, a fixed seed is better.
-    srand(42); 
-    for (size_t i = num_elements - 1; i > 0; --i) {
-        size_t j = rand() % (i + 1);
-        std::swap(indices[i], indices[j]);
-    }
-
-    // Link the shuffled indices into a cycle
-    // h_array[ current_index ] = next_index
-    // The shuffled array gives us the order of visiting.
-    // visiting order: indices[0] -> indices[1] -> ... -> indices[N-1] -> indices[0]
-    for (size_t i = 0; i < num_elements - 1; ++i) {
-        h_array[indices[i]] = indices[i + 1];
-    }
-    // Close the loop
-    h_array[indices[num_elements - 1]] = indices[0];
-
-    printf("Randomization complete.\n");
+    printf("Strided chain initialised.\n");
 
     // Device allocation
     uint64_t* d_array;
@@ -142,13 +126,15 @@ int main(int argc, char** argv) {
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
 
-    // Warmup
-    load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements, 1);
+    // Warmup: traverse the full pointer chain at least once to pull working set into cache.
+    // The chain has num_elements links; the kernel does 100 steps per outer iteration.
+    uint64_t warmup_iters = std::max((uint64_t)1, (uint64_t)(num_elements / 100));
+    load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements, stride_elements, warmup_iters);
     CHECK_CUDA(cudaDeviceSynchronize());
 
     // Measurement
     CHECK_CUDA(cudaEventRecord(start));
-    load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements, iterations);
+    load_kernel<<<blocks, threads_per_block>>>(d_array, num_elements, stride_elements, iterations);
     CHECK_CUDA(cudaEventRecord(stop));
     CHECK_CUDA(cudaEventSynchronize(stop));
 
@@ -170,6 +156,7 @@ int main(int argc, char** argv) {
     double total_data_bytes = (double)active_threads * iterations * 100 * sizeof(uint64_t);
     double gb_per_sec = (total_data_bytes / (milliseconds / 1000.0)) / 1e9;
 
+    std::cout << "Stride Bytes: " << stride_bytes << std::endl;
     std::cout << "Array Size: " << size_mb << " MB" << std::endl;
     std::cout << "Time: " << milliseconds << " ms" << std::endl;
     std::cout << "Effective Bandwidth: " << gb_per_sec << " GB/s" << std::endl;

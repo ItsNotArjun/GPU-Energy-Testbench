@@ -28,20 +28,15 @@ __global__ void store_kernel(uint64_t* array, uint64_t num_elements, uint64_t st
     // We want to force DRAM writes. Best way is to write DIFFERENT data or to huge array.
     // If array > L2, linear write will flush L2.
     for (uint64_t i = 0; i < iterations; ++i) {
-        // Grid-Stride Loop
-        // Each thread processes elements spaced by grid size
-        // e.g. Thread 0 does 0, 0+Grid, 0+2*Grid...
-        // This ensures full coalescing and no collision between threads.
-        for (uint64_t idx = tid; idx < num_elements; idx += gridSize) {
-             // We can unroll here manually if needed, but compiler is good at linear unrolling
-             // Let's do a small unroll block if strictly needed, but simple is better for bandwidth
-             // Simple store:
-             // array[idx] = val;
-             
-             // Use PTX to ensure it's a global store and not optimized away
-             asm volatile (
-                "st.global.u64 [%0], %1;" 
-                :: "l"(base_ptr + idx), "l"(val) 
+        // Strided grid-stride loop.
+        // Thread tid writes to addresses: tid*stride_elements, tid*stride_elements + gridSize*stride_elements, ...
+        // At stride_elements=1 (8B): consecutive threads write consecutive elements -> coalesced.
+        // At stride_elements=4 (32B = 1 sector): consecutive threads write elements 32B apart -> 1 sector per thread -> uncoalesced.
+        // At stride_elements=16 (128B = 1 cache line): each thread writes to a separate cache line -> fully uncoalesced.
+        for (uint64_t idx = tid * stride_elements; idx < num_elements; idx += gridSize * stride_elements) {
+            asm volatile (
+                "st.global.u64 [%0], %1;"
+                :: "l"(base_ptr + idx), "l"(val)
                 : "memory"
             );
         }
@@ -120,12 +115,13 @@ int main(int argc, char** argv) {
     float milliseconds = 0;
     CHECK_CUDA(cudaEventElapsedTime(&milliseconds, start, stop));
 
-    // Calculate Bandwidth
-    // New Logic: Each iteration writes the ENTIRE array exactly once.
-    // Total Bytes = num_elements * sizeof(uint64_t) * iterations
-    double total_write_bytes = (double)num_elements * sizeof(uint64_t) * iterations;
+    // With the strided loop, each thread writes every stride_elements-th element.
+    // Total unique elements written per iteration = num_elements / stride_elements.
+    uint64_t elements_written_per_iter = num_elements / stride_elements;
+    double total_write_bytes = (double)elements_written_per_iter * sizeof(uint64_t) * iterations;
     double gb_per_sec = (total_write_bytes / (milliseconds / 1000.0)) / 1e9;
 
+    std::cout << "Stride Bytes: " << stride_bytes << std::endl;
     std::cout << "Array Size: " << size_mb << " MB" << std::endl;
     std::cout << "Time: " << milliseconds << " ms" << std::endl;
     std::cout << "Effective Bandwidth: " << gb_per_sec << " GB/s" << std::endl;

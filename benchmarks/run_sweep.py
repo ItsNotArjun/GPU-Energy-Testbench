@@ -66,8 +66,10 @@ def run_sweep(benchmark_name, stride_bytes=32, max_size_mb=1024):
     print(f"{'Size (MB)':<15} {'Bandwidth (GB/s)':<20} {'Target Level'}")
     print("-" * 50)
     
-    # Defined Sweep Ranges based on Requirements
-    # L1: 16KB to 256KB
+    # Cache level boundaries measured on RTX 5000 Ada (sm_89, 16GB GDDR6):
+    # L1: up to ~128kB (we sweep up to 256kB to capture the transition)
+    # L2: up to ~64MB  (bandwidth starts dropping at ~40MB in measured data)
+    # DRAM: anything past ~70MB
     l1_points = [0.015625, 0.03125, 0.0625, 0.125, 0.25] 
     
     # L2: 1MB to 64MB (Trying to capture the large L2 of Ada Lovelace)
@@ -112,11 +114,75 @@ def run_sweep(benchmark_name, stride_bytes=32, max_size_mb=1024):
     print("\n")
     return results
 
+def run_calibration(benchmark_name, stride_bytes=32, max_size_mb=25000):
+    """
+    Calibration mode: fix array size per cache level, sweep iteration count.
+    This produces (num_accesses, bandwidth) pairs suitable for linear regression
+    to extract energy-per-access (epsilon) and fixed offset (delta) per memory level.
+    The array size is chosen to fit entirely within the target cache level,
+    ensuring all accesses are hits (after warmup) at that level.
+    """
+    # RTX 5000 Ada cache sizes (from hit/miss sweep data):
+    #   L1 saturates at ~128kB -> use 64kB to be safely inside
+    #   L2 saturates at ~64MB  -> use 20MB to be safely inside
+    #   DRAM                   -> use 200MB (well past L2)
+    LEVEL_CONFIG = {
+        "L1 Cache": {"size_mb": 0.0625,  "iter_list": [100, 500, 1000, 5000, 10000, 50000]},
+        "L2 Cache": {"size_mb": 20.0,    "iter_list": [10, 50, 100, 500, 1000, 5000]},
+        "DRAM":     {"size_mb": 200.0,   "iter_list": [1, 5, 10, 20, 50, 100]},
+    }
+
+    print(f"--- Calibration Sweep for {benchmark_name} (Stride: {stride_bytes} bytes) ---")
+    print(f"{'Level':<12} {'Size (MB)':<12} {'Iterations':<14} {'Bandwidth (GB/s)':<20}")
+    print("-" * 60)
+
+    results = []
+    for level, config in LEVEL_CONFIG.items():
+        size_mb = config["size_mb"]
+        if size_mb > max_size_mb:
+            continue
+        for iters in config["iter_list"]:
+            bw = run_test(benchmark_name, size_mb, stride_bytes, iters)
+            # Compute approximate number of accesses:
+            # For ld: active_threads * iters * 100 unrolled steps
+            # For st: (elements / stride_elements) * iters
+            # We store raw iterations here; the analysis script computes accesses.
+            print(f"{level:<12} {size_mb:<12.4f} {iters:<14} {bw:<20.4f}")
+            results.append({
+                "Benchmark": benchmark_name,
+                "Level": level,
+                "Size_MB": size_mb,
+                "Iterations": iters,
+                "Stride_Bytes": stride_bytes,
+                "Bandwidth_GBs": bw,
+            })
+    print("\n")
+    return results
+
 def main():
     parser = argparse.ArgumentParser(description="Run GPU Memory Microbenchmarks w/ CSV Output")
     parser.add_argument("--arch", type=str, default="sm_80", help="GPU Architecture (sm_80 for A100/30-series, sm_70 for V100, sm_75 for T4)")
     parser.add_argument("--csv", type=str, default="results.csv", help="Output CSV filename")
     parser.add_argument("--max_size_mb", type=float, default=1024.0, help="Maximum array size in MB to test (Default: 1024). Increase for A100/H100.")
+    parser.add_argument(
+        "--stride", type=int, default=32,
+        help=(
+            "Stride in bytes used by BOTH benchmarks. "
+            "Must be a multiple of 8 (sizeof uint64_t). "
+            "32 = one sector, fully coalesced. "
+            "64 = two sectors. 128 = four sectors, uncoalesced. "
+            "Default: 32."
+        )
+    )
+    parser.add_argument(
+        "--mode", type=str, default="sweep",
+        choices=["sweep", "calibrate"],
+        help=(
+            "'sweep': vary array size (current behaviour, for finding cache boundaries). "
+            "'calibrate': fix array size per level, vary iterations to sweep #accesses "
+            "(for linear regression to extract energy-per-access)."
+        )
+    )
     
     args = parser.parse_args()
     
@@ -124,19 +190,18 @@ def main():
     
     # Prepare CSV
     all_results = []
-    
-    # Run Load Benchmark Sweep
-    print(">>> Starting Load Benchmark (ld_benchmark) <<<")
-    # For pointer chasing, higher stride often defeats prefetchers better, 
-    # but the logic inside ld.cu handles the dependency chain regardless of stride value logic-wise.
-    # We stick to paper values.
-    load_results = run_sweep("ld_benchmark", stride_bytes=128, max_size_mb=args.max_size_mb)
-    all_results.extend(load_results)
 
-    # Run Store Benchmark Sweep
-    print(">>> Starting Store Benchmark (st_benchmark) <<<")
-    store_results = run_sweep("st_benchmark", stride_bytes=32, max_size_mb=args.max_size_mb)
-    all_results.extend(store_results)
+    if args.mode == "sweep":
+        print(f"Using stride={args.stride} bytes for both benchmarks.")
+        load_results = run_sweep("ld_benchmark", stride_bytes=args.stride, max_size_mb=args.max_size_mb)
+        store_results = run_sweep("st_benchmark", stride_bytes=args.stride, max_size_mb=args.max_size_mb)
+        all_results = load_results + store_results
+    elif args.mode == "calibrate":
+        print(f"Calibration mode: fixed array size per level, sweeping iterations.")
+        print(f"Using stride={args.stride} bytes for both benchmarks.")
+        load_results = run_calibration("ld_benchmark", stride_bytes=args.stride, max_size_mb=args.max_size_mb)
+        store_results = run_calibration("st_benchmark", stride_bytes=args.stride, max_size_mb=args.max_size_mb)
+        all_results = load_results + store_results
     
     # Save to CSV
     keys = all_results[0].keys()
