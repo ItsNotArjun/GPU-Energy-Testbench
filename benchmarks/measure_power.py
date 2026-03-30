@@ -76,7 +76,11 @@ def compile_benchmark(name, arch="sm_80"):
     exe_name = f"{name}_benchmark"
     print(f"Compiling {name}.cu into {exe_name}...")
     
-    cmd = ["nvcc", "-O3", f"-arch={arch}", f"{name}.cu", "-o", exe_name]
+    if name == "ld":
+        cmd = ["nvcc", "-O3", f"-arch={arch}", "-Xcompiler", "-fopenmp", f"{name}.cu", "-o", exe_name, "-lgomp"]
+    else:
+        cmd = ["nvcc", "-O3", f"-arch={arch}", f"{name}.cu", "-o", exe_name]
+
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
         print(f"Error compiling {name}.cu:")
