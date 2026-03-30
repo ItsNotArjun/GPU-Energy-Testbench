@@ -12,7 +12,7 @@ def compile_benchmarks(arch):
     
     # Compile ld.cu
     cmd_ld = ["nvcc", "-O3", f"-arch={arch}", "-Xcompiler", "-fopenmp", "ld.cu", "-o", "ld_benchmark", "-lgomp"]
-    
+
     print(f"Running: {' '.join(cmd_ld)}")
     res_ld = subprocess.run(cmd_ld, capture_output=True, text=True)
     if res_ld.returncode != 0:
@@ -202,6 +202,7 @@ def main():
         all_results = load_results + store_results
     
     # Save to CSV
+    os.makedirs(os.path.dirname(os.path.abspath(args.csv)), exist_ok=True)
     keys = all_results[0].keys()
     with open(args.csv, 'w', newline='') as output_file:
         dict_writer = csv.DictWriter(output_file, keys)

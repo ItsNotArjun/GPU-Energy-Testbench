@@ -266,7 +266,9 @@ def main():
         results.append(res_st)
         
     # Save CSV
+    
     if results:
+        os.makedirs(os.path.dirname(os.path.abspath(args.csv)), exist_ok=True)
         keys = results[0].keys()
         with open(args.csv, 'w', newline='') as f:
             writer = csv.DictWriter(f, keys)
