@@ -4,6 +4,8 @@
 #include <string>
 #include <cstdlib>
 #include <cstdint>
+#include <omp.h>
+
 
 #define CHECK_CUDA(call) \
     do { \
@@ -90,6 +92,8 @@ int main(int argc, char** argv) {
     // element i points to (i + stride_elements) % num_elements.
     // This creates one or more cycles depending on gcd(num_elements, stride_elements).
     // Each thread starts at tid and chases elements exactly stride_elements apart.
+    omp_set_num_threads(20);
+    #pragma omp parallel for schedule(static)
     for (size_t i = 0; i < num_elements; ++i) {
         h_array[i] = (i + stride_elements) % num_elements;
     }
