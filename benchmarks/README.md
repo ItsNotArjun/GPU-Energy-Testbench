@@ -109,3 +109,6 @@ profile.bat
 3.  Open `profile_st_results.csv`.
     *   **Ratio ≈ 1.0:** Correct. You are writing contiguous data, so the GPU combined 4 threads into one 32-byte transaction. Efficient!
     *   **Ratio > 1.0:** Incorrect. Your stride is breaking coalescence.
+
+
+check it

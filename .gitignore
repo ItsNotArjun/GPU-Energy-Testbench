@@ -1,0 +1,22 @@
+# Compiled CUDA binaries
+benchmarks/ld_benchmark
+benchmarks/ld_benchmark.exe
+benchmarks/st_benchmark
+benchmarks/st_benchmark.exe
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Scratch outputs (use results/run_NN_... for intentional saves)
+scratch/
+
+# Editor
+.vscode/
+*.code-workspace
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
