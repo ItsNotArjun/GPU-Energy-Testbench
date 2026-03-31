@@ -1,0 +1,53 @@
+Benchmark,Size_MB,Bandwidth_GBs,Target_Level,Stride_Bytes
+ld_benchmark,0.015625,136.307,L1 Cache,128
+ld_benchmark,0.03125,136.314,L1 Cache,128
+ld_benchmark,0.0625,272.628,L1 Cache,128
+ld_benchmark,0.125,430.145,L1 Cache,128
+ld_benchmark,0.25,917.826,L1 Cache,128
+ld_benchmark,1,3390.95,L2 Cache,128
+ld_benchmark,2,4562.67,L2 Cache,128
+ld_benchmark,4,5453.48,L2 Cache,128
+ld_benchmark,8,5022.5,L2 Cache,128
+ld_benchmark,16,5230.43,L2 Cache,128
+ld_benchmark,24,5021.29,L2 Cache,128
+ld_benchmark,32,5042.25,L2 Cache,128
+ld_benchmark,40,2624.2,L2 Cache,128
+ld_benchmark,50,2294.09,L2 Cache,128
+ld_benchmark,64,1983.04,L2 Cache,128
+ld_benchmark,100,1724.4,DRAM,128
+ld_benchmark,256,840.889,DRAM,128
+ld_benchmark,512,723.333,DRAM,128
+ld_benchmark,768,689.298,DRAM,128
+ld_benchmark,1024,679.396,DRAM,128
+ld_benchmark,2048,656.187,DRAM,128
+ld_benchmark,4096,645.232,DRAM,128
+ld_benchmark,8192,628.503,DRAM,128
+ld_benchmark,12288,632.138,DRAM,128
+ld_benchmark,16384,627.6,DRAM,128
+ld_benchmark,24576,636.512,DRAM,128
+st_benchmark,0.015625,4.24088,L1 Cache,128
+st_benchmark,0.03125,4.24995,L1 Cache,128
+st_benchmark,0.0625,8.50046,L1 Cache,128
+st_benchmark,0.125,16.9996,L1 Cache,128
+st_benchmark,0.25,33.9992,L1 Cache,128
+st_benchmark,1,45.138,L2 Cache,128
+st_benchmark,2,89.7616,L2 Cache,128
+st_benchmark,4,151.479,L2 Cache,128
+st_benchmark,8,158.821,L2 Cache,128
+st_benchmark,16,151.749,L2 Cache,128
+st_benchmark,24,167.466,L2 Cache,128
+st_benchmark,32,160.075,L2 Cache,128
+st_benchmark,40,153.514,L2 Cache,128
+st_benchmark,50,140.598,L2 Cache,128
+st_benchmark,64,137.84,L2 Cache,128
+st_benchmark,100,132.341,DRAM,128
+st_benchmark,256,150.119,DRAM,128
+st_benchmark,512,161.642,DRAM,128
+st_benchmark,768,165.91,DRAM,128
+st_benchmark,1024,168.188,DRAM,128
+st_benchmark,2048,171.18,DRAM,128
+st_benchmark,4096,171.262,DRAM,128
+st_benchmark,8192,59.3408,DRAM,128
+st_benchmark,12288,19.6882,DRAM,128
+st_benchmark,16384,19.5461,DRAM,128
+st_benchmark,24576,19.3302,DRAM,128
